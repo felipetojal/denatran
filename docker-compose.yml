@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  
+  # BROKER
+  broker:
+    image: eclipse-mosquitto:latest
+    container_name: denatran_broker
+    ports:
+      - "1883:1883"   # Configurando a porta
+    volumes:
+      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf  
+    restart: unless-stopped
