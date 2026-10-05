@@ -1,13 +1,158 @@
-version: '3.8'
-
 services:
-  
+
   # BROKER
   broker:
-    image: eclipse-mosquitto:latest
+    image: eclipse-mosquitto:2
     container_name: denatran_broker
     ports:
-      - "1883:1883"   # Configurando a porta
+      - "1883:1883"
     volumes:
-      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf  
+      - ./broker/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 1883 -t '$$SYS/#' -C 1 -i healthcheck -W 5 || exit 1"]
+      interval: 5s
+      timeout: 8s
+      retries: 10
     restart: unless-stopped
+
+  # DRIVER DATABASE
+  driver_db:
+    image: postgres:15
+    container_name: denatran_driver_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: driver_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - driver_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d driver_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # VEHICLE DATABASE
+  vehicle_db:
+    image: postgres:15
+    container_name: denatran_vehicle_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vehicle_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - vehicle_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vehicle_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # FINES DATABASE
+  fines_db:
+    image: postgres:15
+    container_name: denatran_fines_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fines_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - fines_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fines_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # DRIVER SERVICE
+  driver:
+    build:
+      context: ./driver
+      dockerfile: Dockerfile
+    container_name: denatran_driver
+    environment:
+      MQTT_BROKER: tcp://broker:1883
+      DB_HOST: driver_db
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: driver_db
+    depends_on:
+      broker:
+        condition: service_healthy
+      driver_db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # VEHICLE SERVICE
+  vehicle:
+    build:
+      context: ./vehicle
+      dockerfile: Dockerfile
+    container_name: denatran_vehicle
+    environment:
+      MQTT_BROKER: tcp://broker:1883
+      DB_HOST: vehicle_db
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: vehicle_db
+    depends_on:
+      broker:
+        condition: service_healthy
+      vehicle_db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # FINES SERVICE
+  fines:
+    build:
+      context: ./fines
+      dockerfile: Dockerfile
+    container_name: denatran_fines
+    environment:
+      MQTT_BROKER: tcp://broker:1883
+      DB_HOST: fines_db
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: fines_db
+    depends_on:
+      broker:
+        condition: service_healthy
+      fines_db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # CLIENT (ferramenta de linha de comando; não sobe com o "up")
+  #   docker compose run --rm client <comando> [flags]
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: denatran_client
+    environment:
+      MQTT_BROKER: tcp://broker:1883
+    depends_on:
+      broker:
+        condition: service_healthy
+      driver:
+        condition: service_started
+      vehicle:
+        condition: service_started
+      fines:
+        condition: service_started
+    profiles: ["tools"]
+
+volumes:
+  driver_data:
+  vehicle_data:
+  fines_data:
